@@ -4,3 +4,7 @@
 [![CI](https://github.com/creachadair/mhttp/actions/workflows/go-presubmit.yml/badge.svg?event=push&branch=main)](https://github.com/creachadair/mhttp/actions/workflows/go-presubmit.yml)
 
 This repository defines Go packages for HTTP clients and servers.
+
+## Packages
+
+- [proxyconn](./proxyconn) an HTTP reverse proxy bridge ([package docs](https://godoc.org/github.com/creachadair/mhttp/proxyconn))
