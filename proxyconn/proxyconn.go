@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-// A Bridge is an [net/http.Handler] that forwards requests to a reverse proxy.
+// A Bridge is an [http.Handler] that forwards requests to a reverse proxy.
 //
 // It handles plain HTTP requests by delegated directly to an underlying
 // handler, and provides a minimal implementation of the HTTP CONNECT protocol
@@ -80,6 +80,10 @@ func (b *Bridge) Addr() net.Addr {
 	return addrStub(b.Addrs[0])
 }
 
+// ServeHTTP implements the [http.Handler] interface. It handles CONNECT
+// requests and forwards their connections (if accepted) to the Accept method;
+// all other requests are delegated to the underlying handler, if one is
+// defined.
 func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	b.init()
 
@@ -106,8 +110,8 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bw.Flush()
-	// Hereafter, the server will no longer maintain conn, and we must maintain
-	// and close it ourselves.
+	// Hereafter, the server will no longer use or maintain conn, and we must
+	// handle all writes and closes ourselves.
 
 	if err := b.push(r.Context(), conn); err != nil {
 		defer conn.Close()
