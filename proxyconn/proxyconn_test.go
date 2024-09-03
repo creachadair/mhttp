@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/creachadair/mds/mtest"
 	"github.com/creachadair/mhttp/proxyconn"
 	"github.com/creachadair/tlsutil"
 	gocmp "github.com/google/go-cmp/cmp"
@@ -27,6 +28,15 @@ func TestBridge(t *testing.T) {
 		reqs = append(reqs, fmt.Sprintf("%s %s", r.Method, r.URL))
 		fmt.Fprintln(w, "ok, got it")
 	})
+
+	// Set up a fake "backend" to make sure connections not claimed by the proxy
+	// are correctly redirected.
+	alt := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqs = append(reqs, fmt.Sprintf("remote %s %s", r.Method, r.URL))
+		fmt.Fprintln(w, "do you come from a land down under?")
+	}))
+	alt.StartTLS()
+	defer alt.Close()
 
 	b := &proxyconn.Bridge{
 		Addrs: []string{"fuzzbucket", "beeblebrox:443"},
@@ -74,14 +84,15 @@ func TestBridge(t *testing.T) {
 		t.Errorf("Get plain: unexpected error: %v", err)
 	}
 
+	// Set up our own transport with knowledge of the server's custom cert.
 	certPool := x509.NewCertPool()
 	certPool.AppendCertsFromPEM(cert.CertPEM())
-	cli := &http.Client{
-		Transport: &http.Transport{
-			Proxy:           http.ProxyURL(hsURL),
-			TLSClientConfig: &tls.Config{RootCAs: certPool},
-		},
+	tsp := &http.Transport{
+		Proxy:           http.ProxyURL(hsURL),
+		TLSClientConfig: &tls.Config{RootCAs: certPool},
 	}
+	cli := &http.Client{Transport: tsp}
+
 	if _, err := cli.Get("https://fuzzbucket/proxied"); err != nil {
 		t.Errorf("Get proxied: unexpected error: %v", err)
 	}
@@ -95,17 +106,42 @@ func TestBridge(t *testing.T) {
 		t.Errorf("Get nonesuch: got %+v, want error", rsp)
 	}
 
+	// At this point the bridge does not forward connections for targets not in
+	// its addrs list. Make sure that is enforced.
+	t.Run("NoForward", func(t *testing.T) {
+		if rsp, err := cli.Get(alt.URL + "/reject"); err == nil {
+			t.Errorf("Get(%s/reject): unexpected success", alt.URL)
+			if got, want := rsp.StatusCode, http.StatusForbidden; got != want {
+				t.Errorf("Get(%s/reject): got status %d, want %d", alt.URL, got, want)
+			}
+		}
+	})
+
+	// Now set ForwardConnect and verify that the bridge properly forwards to
+	// the alt server.  For this, disable cert verification because we can't get
+	// the test server's cert and that doesn't matter for the plumbing we're
+	// testing here.
+	t.Run("Forward", func(t *testing.T) {
+		mtest.Swap(t, &b.ForwardConnect, true)
+		mtest.Swap(t, &tsp.TLSClientConfig.InsecureSkipVerify, true)
+
+		if _, err := cli.Get(alt.URL + "/ok"); err != nil {
+			t.Errorf("Get %s/ok: unexpected error: %v", alt.URL, err)
+		}
+	})
+
 	pserv.Shutdown(context.Background())
 	<-pdone
 	hs.Close()
 
 	// Make sure the plumbing worked.
 	if diff := gocmp.Diff(reqs, []string{
-		"GET /direct", "GET /proxied", "HEAD /proxied", "POST /proxied",
+		"GET /direct", "GET /proxied", "HEAD /proxied", "POST /proxied", "remote GET /ok",
 	}); diff != "" {
 		t.Errorf("Requests (-got, +want):\n%s", diff)
 	}
 	if ndirect != 1 {
 		t.Errorf("Got %d direct requests, want 1", ndirect)
 	}
+
 }

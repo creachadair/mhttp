@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -21,18 +22,25 @@ import (
 // that implements [net.Listener]. When a valid CONNECT request is received, it
 // hijacks the connection and forwards it via the listener's Accept method.
 type Bridge struct {
-	// Addrs define the host[:port] combinations the Connector will accept as
-	// targets for a CONNECT request. If none are defined, CONNECT requests will
-	// be rejected. If a port is omitted, ":443" is assumed.
+	// Addrs define the host[:port] combinations the Bridge will accept as
+	// targets for a CONNECT request to be prxoied. If none are defined, CONNECT
+	// requests will be forwarded directly, or rejected, depending on the value
+	// of the ForwardConnect option. If a port is omitted, ":443" is assumed.
 	Addrs []string
 
 	// Handler is the underlying handler to which plain HTTP requests are
 	// delegated. If nil, requests other than CONNECT are rejected.
 	Handler http.Handler
 
+	// ForwardConnect, if true, causes the Bridge to directly forward CONNECT
+	// requests that are not listed in Addrs to their specified targets, without
+	// delivering them to the Accept method.  When false, CONNECT requests not
+	// matching one of the Addrs are rejected.
+	ForwardConnect bool
+
 	initOnce sync.Once
 	queue    chan net.Conn // channels waiting to be Accepted
-	stopped  chan struct{} // closed when the Connector is closed
+	stopped  chan struct{} // closed when the Bridge is closed
 }
 
 func (b *Bridge) init() {
@@ -100,7 +108,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !b.hostMatchesTarget(r.URL.Host) {
-		http.Error(w, fmt.Sprintf("target address %q not recognized", r.URL.Host), http.StatusForbidden)
+		b.forwardConnect(w, r)
 		return
 	}
 
@@ -145,6 +153,45 @@ func (b *Bridge) delegateHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.Handler.ServeHTTP(w, r)
+}
+
+// forwardConnect either forwards the specified request to the underlying
+// handler, or reports an error.
+func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
+	if !b.ForwardConnect {
+		http.Error(w, fmt.Sprintf("target address %q not recognized", r.URL.Host), http.StatusForbidden)
+		return
+	}
+
+	// Dial the remote server.
+	rconn, err := net.Dial("tcp", r.URL.Host)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	// Hijack the caller's connection.
+	cconn, bw, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	bw.Flush()
+	// Hereafter, the server will no longer use or maintain conn, and we must
+	// handle all writes and closes ourselves.
+
+	// Report that the connection is being transferred...
+	fmt.Fprintf(cconn, "%s 200 OK\r\n\r\n", r.Proto)
+
+	// Splice the connections together.
+	go func() {
+		io.Copy(cconn, rconn)
+		cconn.(*net.TCPConn).CloseWrite()
+	}()
+	go func() {
+		io.Copy(rconn, cconn)
+		rconn.(*net.TCPConn).CloseWrite()
+	}()
 }
 
 // hostMatchesTarget reports whether host matches any of the designated
