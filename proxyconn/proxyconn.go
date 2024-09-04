@@ -64,7 +64,7 @@ func (b *Bridge) init() {
 	})
 }
 
-// Metrics returns a map of server metrics. The caller is responsible for
+// Metrics returns a map of bridge metrics. The caller is responsible for
 // exporting these metrics.
 func (b *Bridge) Metrics() *expvar.Map {
 	m := new(expvar.Map)
