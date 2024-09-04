@@ -44,6 +44,7 @@ func TestBridge(t *testing.T) {
 			ndirect++
 			handler(w, r)
 		}),
+		Logf: t.Logf,
 	}
 
 	// Serve the proxy bridge to callers.

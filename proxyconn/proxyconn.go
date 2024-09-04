@@ -38,6 +38,10 @@ type Bridge struct {
 	// matching one of the Addrs are rejected.
 	ForwardConnect bool
 
+	// Logf, if non-nil, is used to write log messages.  If nil, logs are
+	// discarded.
+	Logf func(string, ...any)
+
 	initOnce sync.Once
 	queue    chan net.Conn // channels waiting to be Accepted
 	stopped  chan struct{} // closed when the Bridge is closed
@@ -121,6 +125,7 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Hereafter, the server will no longer use or maintain conn, and we must
 	// handle all writes and closes ourselves.
 
+	b.logf("accept CONNECT for target %q", r.URL.Host)
 	if err := b.push(r.Context(), conn); err != nil {
 		defer conn.Close()
 		fmt.Fprintf(conn, "%s %d %s\r\n\r\n",
@@ -149,6 +154,7 @@ func (b *Bridge) push(ctx context.Context, conn net.Conn) error {
 // reports an error.
 func (b *Bridge) delegateHTTP(w http.ResponseWriter, r *http.Request) {
 	if b.Handler == nil {
+		b.logf("reject proxy request %v", r.URL)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
@@ -159,6 +165,7 @@ func (b *Bridge) delegateHTTP(w http.ResponseWriter, r *http.Request) {
 // handler, or reports an error.
 func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
 	if !b.ForwardConnect {
+		b.logf("reject CONNECT for target %q", r.URL.Host)
 		http.Error(w, fmt.Sprintf("target address %q not recognized", r.URL.Host), http.StatusForbidden)
 		return
 	}
@@ -184,6 +191,7 @@ func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(cconn, "%s 200 OK\r\n\r\n", r.Proto)
 
 	// Splice the connections together.
+	b.logf("splice CONNECT for target %q", r.URL.Host)
 	go func() {
 		io.Copy(cconn, rconn)
 		cconn.(*net.TCPConn).CloseWrite()
@@ -205,6 +213,12 @@ func (b *Bridge) hostMatchesTarget(host string) bool {
 		}
 	}
 	return false
+}
+
+func (b *Bridge) logf(msg string, args ...any) {
+	if b.Logf != nil {
+		b.Logf(msg, args...)
+	}
 }
 
 // addrStub implements the [net.Addr] interface for a fake address.
