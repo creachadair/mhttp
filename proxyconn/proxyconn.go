@@ -18,7 +18,7 @@ import (
 
 // A Bridge is an [http.Handler] that forwards requests to a reverse proxy.
 //
-// It handles plain HTTP requests by delegated directly to an underlying
+// It handles plain HTTP requests by delegating directly to an underlying
 // handler, and provides a minimal implementation of the HTTP CONNECT protocol
 // that implements [net.Listener]. When a valid CONNECT request is received, it
 // hijacks the connection and forwards it via the listener's Accept method.
