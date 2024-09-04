@@ -7,6 +7,7 @@ package proxyconn
 import (
 	"context"
 	"errors"
+	"expvar"
 	"fmt"
 	"io"
 	"net"
@@ -45,6 +46,15 @@ type Bridge struct {
 	initOnce sync.Once
 	queue    chan net.Conn // channels waiting to be Accepted
 	stopped  chan struct{} // closed when the Bridge is closed
+
+	httpProxyReject   expvar.Int // HTTP proxy requests rejected
+	httpProxyDelegate expvar.Int // HTTP proxy requests delegated
+	fwdConnReject     expvar.Int // unclaimed CONNECT rejected
+	fwdConnError      expvar.Int // unclaimed CONNECT failed
+	fwdConnSplice     expvar.Int // unclaimed CONNECT spliced
+	proxyConnRequest  expvar.Int // matching CONNECT requests
+	proxyConnError    expvar.Int // matching CONNECT failed
+	proxyConnAccept   expvar.Int // matching CONNECT accepted
 }
 
 func (b *Bridge) init() {
@@ -52,6 +62,21 @@ func (b *Bridge) init() {
 		b.stopped = make(chan struct{})
 		b.queue = make(chan net.Conn)
 	})
+}
+
+// Metrics returns a map of server metrics. The caller is responsible for
+// exporting these metrics.
+func (b *Bridge) Metrics() *expvar.Map {
+	m := new(expvar.Map)
+	m.Set("http_proxy_reject", &b.httpProxyReject)
+	m.Set("http_proxy_delegate", &b.httpProxyDelegate)
+	m.Set("fwd_conn_reject", &b.fwdConnReject)
+	m.Set("fwd_conn_error", &b.fwdConnError)
+	m.Set("fwd_conn_splice", &b.fwdConnSplice)
+	m.Set("proxy_conn_request", &b.proxyConnRequest)
+	m.Set("proxy_conn_error", &b.proxyConnError)
+	m.Set("proxy_conn_accept", &b.proxyConnAccept)
+	return m
 }
 
 // Accept implements part of [net.Listener]. It blocks until either a
@@ -115,9 +140,11 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		b.forwardConnect(w, r)
 		return
 	}
+	b.proxyConnRequest.Add(1)
 
 	conn, bw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
+		b.proxyConnError.Add(1)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -125,13 +152,14 @@ func (b *Bridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Hereafter, the server will no longer use or maintain conn, and we must
 	// handle all writes and closes ourselves.
 
-	b.logf("accept CONNECT for target %q", r.URL.Host)
 	if err := b.push(r.Context(), conn); err != nil {
+		b.proxyConnError.Add(1)
 		defer conn.Close()
 		fmt.Fprintf(conn, "%s %d %s\r\n\r\n",
 			r.Proto, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable))
 		return
 	}
+	b.proxyConnAccept.Add(1)
 
 	// Report success to the caller, then no more.
 	fmt.Fprintf(conn, "%s 200 OK\r\n\r\n", r.Proto)
@@ -154,10 +182,12 @@ func (b *Bridge) push(ctx context.Context, conn net.Conn) error {
 // reports an error.
 func (b *Bridge) delegateHTTP(w http.ResponseWriter, r *http.Request) {
 	if b.Handler == nil {
+		b.httpProxyReject.Add(1)
 		b.logf("reject proxy request %v", r.URL)
 		http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 		return
 	}
+	b.httpProxyDelegate.Add(1)
 	b.Handler.ServeHTTP(w, r)
 }
 
@@ -165,6 +195,7 @@ func (b *Bridge) delegateHTTP(w http.ResponseWriter, r *http.Request) {
 // handler, or reports an error.
 func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
 	if !b.ForwardConnect {
+		b.fwdConnReject.Add(1)
 		b.logf("reject CONNECT for target %q", r.URL.Host)
 		http.Error(w, fmt.Sprintf("target address %q not recognized", r.URL.Host), http.StatusForbidden)
 		return
@@ -173,6 +204,7 @@ func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
 	// Dial the remote server.
 	rconn, err := net.Dial("tcp", r.URL.Host)
 	if err != nil {
+		b.fwdConnError.Add(1)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -180,6 +212,7 @@ func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
 	// Hijack the caller's connection.
 	cconn, bw, err := http.NewResponseController(w).Hijack()
 	if err != nil {
+		b.fwdConnError.Add(1)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -191,7 +224,7 @@ func (b *Bridge) forwardConnect(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(cconn, "%s 200 OK\r\n\r\n", r.Proto)
 
 	// Splice the connections together.
-	b.logf("splice CONNECT for target %q", r.URL.Host)
+	b.fwdConnSplice.Add(1)
 	go func() {
 		io.Copy(cconn, rconn)
 		cconn.(*net.TCPConn).CloseWrite()

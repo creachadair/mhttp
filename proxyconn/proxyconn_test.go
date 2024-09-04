@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"expvar"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -136,13 +137,39 @@ func TestBridge(t *testing.T) {
 	hs.Close()
 
 	// Make sure the plumbing worked.
-	if diff := gocmp.Diff(reqs, []string{
-		"GET /direct", "GET /proxied", "HEAD /proxied", "POST /proxied", "remote GET /ok",
-	}); diff != "" {
-		t.Errorf("Requests (-got, +want):\n%s", diff)
-	}
-	if ndirect != 1 {
-		t.Errorf("Got %d direct requests, want 1", ndirect)
-	}
+	t.Run("CheckResponses", func(t *testing.T) {
+		if diff := gocmp.Diff(reqs, []string{
+			"GET /direct", "GET /proxied", "HEAD /proxied", "POST /proxied", "remote GET /ok",
+		}); diff != "" {
+			t.Errorf("Requests (-got, +want):\n%s", diff)
+		}
+		if ndirect != 1 {
+			t.Errorf("Got %d direct requests, want 1", ndirect)
+		}
+	})
 
+	// Check metrics make sense.
+	t.Run("CheckMetrics", func(t *testing.T) {
+		m := b.Metrics()
+		checks := []struct {
+			name string
+			want int64
+		}{
+			{"http_proxy_reject", 0},   // the bridge has a handler
+			{"http_proxy_delegate", 1}, // GET /direct
+			{"fwd_conn_reject", 2},     // nonesuch, alt
+			{"fwd_conn_splice", 1},     // remote GET /ok
+			{"proxy_conn_request", 3},
+			{"proxy_conn_accept", 3}, // fuzzbucket x 2, beeblebrox x 1
+		}
+		for _, c := range checks {
+			if v := m.Get(c.name); v == nil {
+				t.Errorf("Metric %q not found", c.name)
+			} else if z, ok := v.(*expvar.Int); !ok {
+				t.Errorf("Metric %q is %T, not int", c.name, v)
+			} else if got := z.Value(); got != c.want {
+				t.Errorf("Metric %q: got %v, want %v", c.name, got, c.want)
+			}
+		}
+	})
 }
