@@ -58,9 +58,9 @@ func TestBridge(t *testing.T) {
 
 	// Start a separate server to handler requests forwarded by the proxy.
 	// This server "listens" on the proxy and does not use the network.
-	cert, err := tlsutil.NewSigningCert(&x509.Certificate{
+	cert, err := tlsutil.NewSigningCert(10*time.Minute, &x509.Certificate{
 		DNSNames: []string{"fuzzbucket", "beeblebrox"},
-	}, 10*time.Minute)
+	})
 	if err != nil {
 		t.Fatalf("Create certificate: %v", err)
 	}
