@@ -24,7 +24,7 @@ import (
 // hijacks the connection and forwards it via the listener's Accept method.
 type Bridge struct {
 	// Addrs define the host[:port] combinations the Bridge will accept as
-	// targets for a CONNECT request to be prxoied. If none are defined, CONNECT
+	// targets for a CONNECT request to be proxied. If none are defined, CONNECT
 	// requests will be forwarded directly, or rejected, depending on the value
 	// of the ForwardConnect option. If a port is omitted, ":443" is assumed.
 	Addrs []string
