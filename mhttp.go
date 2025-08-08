@@ -19,7 +19,7 @@ func (r Range) Span() int64 { return r.End - r.Start }
 
 // ContentRange returns the contents of a content-range header for r given the
 // specified total resource size.
-func (r Range) ContentRange(size int) string {
+func (r Range) ContentRange(size int64) string {
 	return fmt.Sprintf("bytes %d-%d/%d", r.Start, r.End-1, size)
 }
 
