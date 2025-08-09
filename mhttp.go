@@ -14,27 +14,29 @@ type Range struct {
 	Start, End int64
 }
 
-// Span reports the number of bytes spanned by r.
-func (r Range) Span() int64 { return r.End - r.Start }
+// Size reports the number of bytes spanned by r.
+func (r Range) Size() int64 { return r.End - r.Start }
 
 // String returns the representation of r as it appears in a Range header.
 func (r Range) String() string { return fmt.Sprintf("%d-%d", r.Start, r.End-1) }
 
 // ContentRange returns the contents of a content-range header for r given the
 // specified total resource size.
-func (r Range) ContentRange(size int64) string {
-	return fmt.Sprintf("bytes %d-%d/%d", r.Start, r.End-1, size)
+func (r Range) ContentRange(totalSize int64) string {
+	return fmt.Sprintf("bytes %d-%d/%d", r.Start, r.End-1, totalSize)
 }
 
 // ParseRangeHeader parses the contents of an HTTP [Range] header for a
-// resource of the specified size in bytes. On success, the resulting ranges
-// are adjusted to absolute offsets within the resource.
+// resource of the specified total size in bytes. On success, the resulting
+// ranges are adjusted to absolute offsets within the resource.
+// Ranges that start within the total size are clipped to fit, even if their
+// specified endpoint is greater.
 //
 // If s == "", it returns empty without error, indicating the entire resource
 // is requested in a single range.
 //
 // [Range]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range
-func ParseRangeHeader(size int64, s string) ([]Range, error) {
+func ParseRangeHeader(totalSize int64, s string) ([]Range, error) {
 	if s == "" {
 		return nil, nil // no ranges are requested
 	}
@@ -63,22 +65,22 @@ func ParseRangeHeader(size int64, s string) ([]Range, error) {
 			return nil, fmt.Errorf("invalid range end %q: %w", hi, err)
 		}
 		// Reaching here, vlo and vhi are valid range endpoints if present, but
-		// may not be correctly bounded for size.
+		// may not be correctly bounded for totalSize.
 
 		switch {
 		case lo == "": // -hi → (size-hi)..size
-			if vhi > size {
-				return nil, fmt.Errorf("span %d exceeds size %d", vhi, size)
+			if vhi > totalSize {
+				return nil, fmt.Errorf("span %d exceeds size %d", vhi, totalSize)
 			}
-			out = append(out, Range{Start: size - vhi, End: size})
+			out = append(out, Range{Start: totalSize - vhi, End: totalSize})
 		case hi == "": // lo- → lo..size
-			out = append(out, Range{Start: vlo, End: size})
+			out = append(out, Range{Start: vlo, End: totalSize})
 		default:
-			out = append(out, Range{Start: vlo, End: min(vhi+1, size)})
+			out = append(out, Range{Start: vlo, End: min(vhi+1, totalSize)})
 			// +1 to make the range exclusive; min to cap at the actual size
 		}
-		if st := out[len(out)-1].Start; st > size {
-			return nil, fmt.Errorf("range %d: start %d > size %d", len(out), st, size)
+		if st := out[len(out)-1].Start; st > totalSize {
+			return nil, fmt.Errorf("range %d: start %d > size %d", len(out), st, totalSize)
 		}
 	}
 	return out, nil
