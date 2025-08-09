@@ -17,6 +17,9 @@ type Range struct {
 // Span reports the number of bytes spanned by r.
 func (r Range) Span() int64 { return r.End - r.Start }
 
+// String returns the representation of r as it appears in a Range header.
+func (r Range) String() string { return fmt.Sprintf("%d-%d", r.Start, r.End-1) }
+
 // ContentRange returns the contents of a content-range header for r given the
 // specified total resource size.
 func (r Range) ContentRange(size int64) string {
