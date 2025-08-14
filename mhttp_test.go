@@ -71,3 +71,45 @@ func tr(vs ...int) []mhttp.Range {
 	}
 	return out
 }
+
+func TestMatch(t *testing.T) {
+	tests := []struct {
+		header       string
+		etag         string
+		strong, weak bool
+	}{
+		{"", "", true, true},
+		{"", "apple", true, true},
+		{"*", "", false, false},
+		{"*", "pear", true, true},
+
+		// Without quoting (non-standard, but tolerated).
+		{"plum, cherry", "plum", true, true},
+		{"plum, cherry", "quince", false, false},
+		{"plum, cherry", "", false, false},
+
+		// With quoting.
+		{`"apple", "pear"`, "apple", true, true},
+		{`"apple", "pear"`, `"pear"`, true, true},
+		{`"apple", "pear"`, "plum", false, false},
+		{`"apple", "pear"`, `"plum"`, false, false},
+		{`"apple", pear`, "apple", true, true},
+		{`"apple", pear`, "pear", true, true},
+
+		// With "weak" prefixes.
+		{`W/"apple"`, `"apple"`, false, true},
+		{`"apple"`, `W/"apple"`, false, true},
+		{`W/"pear"`, `W/"pear"`, false, true},
+		{`W/"pear"`, `W/"plum"`, false, false},
+		{`"apple", W/"pear", "plum"`, `"pear"`, false, true},
+	}
+	for _, tc := range tests {
+		m := mhttp.ParseMatchHeader(tc.header)
+		if got := m.Matches(tc.etag); got != tc.strong {
+			t.Errorf("Strong %#q match %#q: got %v, want %v", tc.header, tc.etag, got, tc.strong)
+		}
+		if got := m.MatchesWeak(tc.etag); got != tc.weak {
+			t.Errorf("Weak %#q match %#q: got %v, want %v", tc.header, tc.etag, got, tc.weak)
+		}
+	}
+}

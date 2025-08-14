@@ -85,3 +85,87 @@ func ParseRangeHeader(totalSize int64, s string) ([]Range, error) {
 	}
 	return out, nil
 }
+
+// Match is the parsed representation of an If-Match or If-None-Match header.
+type Match struct {
+	tags []string
+}
+
+// IsPresent reports whether a match header was present at the time of parsing.
+func (m Match) IsPresent() bool { return m.tags != nil }
+
+// IsGlob reports whether the match header value was a glob ("*").
+func (m Match) IsGlob() bool { return m.tags != nil && len(m.tags) == 0 }
+
+// Matches reports whether any of the tags in m match the specified etag using
+// the "[strong]" comparison algorithm.
+//
+// If no match expression is present, the answer is always true.
+// A glob match accepts any non-empty etag value.
+// Otherwise, it reports whether etag non-weak tag and exactly equal to
+// one of the non-weak match tags, if any.
+//
+// [strong]: https://httpwg.org/specs/rfc9110.html#rfc.section.8.8.3.2
+func (m Match) Matches(etag string) bool {
+	if !m.IsPresent() {
+		return true
+	} else if m.IsGlob() {
+		return etag != ""
+	}
+	clean, isWeak := trimTag(etag)
+	if isWeak {
+		return false
+	}
+	for _, tag := range m.tags {
+		if c, isWeak := trimTag(tag); !isWeak && c == clean {
+			return true
+		}
+	}
+	return false
+}
+
+// Matches reports whether any of the tags in m match the specified etag using
+// the "[weak]" comparison algorithm.
+//
+// If no match expression is present, the answer is always true.
+// A glob match accepts any non-empty etag value.
+// Otherwise, it reports whether etag is exactly equal to one of the match tags
+// disregarding whether etag or the match tags are weak.
+//
+// [weak]: https://httpwg.org/specs/rfc9110.html#rfc.section.8.8.3.2
+func (m Match) MatchesWeak(etag string) bool {
+	if !m.IsPresent() {
+		return true
+	} else if m.IsGlob() {
+		return etag != ""
+	}
+	clean, _ := trimTag(etag)
+	for _, tag := range m.tags {
+		if c, _ := trimTag(tag); c == clean {
+			return true
+		}
+	}
+	return false
+}
+
+func trimTag(s string) (_ string, isWeak bool) {
+	tag, ok := strings.CutPrefix(strings.TrimSpace(s), "W/")
+	return strings.TrimSuffix(strings.TrimPrefix(tag, `"`), `"`), ok
+}
+
+// ParseMatchHeader parses the contents of an HTTP If-Match or If-None-Match
+// header and returns a [Match]. An empty header matches all resources;
+// otherwise see [Match.Matches] for matching rules.
+func ParseMatchHeader(s string) Match {
+	clean := strings.TrimSpace(s)
+	if clean == "" {
+		return Match{} // not present
+	} else if clean == "*" {
+		return Match{tags: []string{}} // glob only
+	}
+	qs := strings.Split(clean, ",")
+	for i, q := range qs {
+		qs[i] = strings.TrimSpace(q)
+	}
+	return Match{tags: qs}
+}
