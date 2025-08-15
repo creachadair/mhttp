@@ -7,4 +7,5 @@ This repository defines Go packages for HTTP clients and servers.
 
 ## Packages
 
+- [mhttp](.) utilities for HTTP requests and reaponses ([package docs](https://godoc.org/github.com/creachadair/mhttp))
 - [proxyconn](./proxyconn) an HTTP reverse proxy bridge ([package docs](https://godoc.org/github.com/creachadair/mhttp/proxyconn))
