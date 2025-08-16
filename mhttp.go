@@ -102,7 +102,7 @@ func (m Match) IsGlob() bool { return m.tags != nil && len(m.tags) == 0 }
 //
 // If no match expression is present, the answer is always true.
 // A glob match accepts any non-empty etag value.
-// Otherwise, it reports whether etag non-weak tag and exactly equal to
+// Otherwise, it reports whether etag is non-weak and exactly equal to
 // one of the non-weak match tags, if any.
 //
 // [strong]: https://httpwg.org/specs/rfc9110.html#rfc.section.8.8.3.2
