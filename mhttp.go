@@ -88,14 +88,19 @@ func ParseRangeHeader(totalSize int64, s string) ([]Range, error) {
 
 // Match is the parsed representation of an If-Match or If-None-Match header.
 type Match struct {
-	tags []string
+	terms []term
+}
+
+type term struct {
+	tag  string
+	weak bool
 }
 
 // IsPresent reports whether a match header was present at the time of parsing.
-func (m Match) IsPresent() bool { return m.tags != nil }
+func (m Match) IsPresent() bool { return m.terms != nil }
 
 // IsGlob reports whether the match header value was a glob ("*").
-func (m Match) IsGlob() bool { return m.tags != nil && len(m.tags) == 0 }
+func (m Match) IsGlob() bool { return m.terms != nil && len(m.terms) == 0 }
 
 // Matches reports whether any of the tags in m match the specified etag using
 // the "[strong]" comparison algorithm.
@@ -104,6 +109,15 @@ func (m Match) IsGlob() bool { return m.tags != nil && len(m.tags) == 0 }
 // A glob match accepts any non-empty etag value.
 // Otherwise, it reports whether etag is non-weak and exactly equal to
 // one of the non-weak match tags, if any.
+//
+// The etag should have one of the following formats:
+//
+//	W/"value"
+//	"value"
+//	value
+//
+// The first is treated as a "weak" validator; the other two formats are
+// treated as ordinary validators.
 //
 // [strong]: https://httpwg.org/specs/rfc9110.html#rfc.section.8.8.3.2
 func (m Match) Matches(etag string) bool {
@@ -116,21 +130,30 @@ func (m Match) Matches(etag string) bool {
 	if isWeak {
 		return false
 	}
-	for _, tag := range m.tags {
-		if c, isWeak := trimTag(tag); !isWeak && c == clean {
+	for _, term := range m.terms {
+		if !term.weak && clean == term.tag {
 			return true
 		}
 	}
 	return false
 }
 
-// Matches reports whether any of the tags in m match the specified etag using
-// the "[weak]" comparison algorithm.
+// MatchesWeak reports whether any of the tags in m match the specified etag
+// using the "[weak]" comparison algorithm.
 //
 // If no match expression is present, the answer is always true.
 // A glob match accepts any non-empty etag value.
 // Otherwise, it reports whether etag is exactly equal to one of the match tags
 // disregarding whether etag or the match tags are weak.
+//
+// The etag should have one of the following formats:
+//
+//	W/"value"
+//	"value"
+//	value
+//
+// The first is treated as a "weak" validator; the other two formats are
+// treated as ordinary validators.
 //
 // [weak]: https://httpwg.org/specs/rfc9110.html#rfc.section.8.8.3.2
 func (m Match) MatchesWeak(etag string) bool {
@@ -140,8 +163,8 @@ func (m Match) MatchesWeak(etag string) bool {
 		return etag != ""
 	}
 	clean, _ := trimTag(etag)
-	for _, tag := range m.tags {
-		if c, _ := trimTag(tag); c == clean {
+	for _, term := range m.terms {
+		if term.tag == clean {
 			return true
 		}
 	}
@@ -154,18 +177,45 @@ func trimTag(s string) (_ string, isWeak bool) {
 }
 
 // ParseMatchHeader parses the contents of an HTTP If-Match or If-None-Match
-// header and returns a [Match]. An empty header matches all resources;
-// otherwise see [Match.Matches] for matching rules.
-func ParseMatchHeader(s string) Match {
+// header and returns a [Match]. If the header is empty it returns a Match that
+// matches all resources. Use [Match.IsPresent] to check for this case.
+// Otherwise, see [Match.Matches] and [Match.MatchesWeak] for matching rules.
+// An error is only reported if the header is present but invalid.
+func ParseMatchHeader(s string) (Match, error) {
 	clean := strings.TrimSpace(s)
 	if clean == "" {
-		return Match{} // not present
+		return Match{}, nil // not present
 	} else if clean == "*" {
-		return Match{tags: []string{}} // glob only
+		return Match{terms: []term{}}, nil // glob only
 	}
-	qs := strings.Split(clean, ",")
-	for i, q := range qs {
-		qs[i] = strings.TrimSpace(q)
+	var terms []term
+	for clean != "" {
+		rest, isWeak := strings.CutPrefix(clean, "W/")
+		q, rest, ok := cutQuoted(rest)
+		if !ok {
+			return Match{}, fmt.Errorf("invalid match term in %q", rest)
+		}
+		terms = append(terms, term{tag: q, weak: isWeak})
+		clean, ok = strings.CutPrefix(strings.TrimSpace(rest), ",")
+		if !ok && clean != "" {
+			return Match{}, fmt.Errorf("extra text after term %q", clean)
+		} else if ok && clean == "" {
+			return Match{}, fmt.Errorf("missing term after %q", q)
+		}
+		clean = strings.TrimSpace(clean)
 	}
-	return Match{tags: qs}
+	return Match{terms: terms}, nil
+}
+
+func cutQuoted(s string) (quoted, rest string, _ bool) {
+	body, ok := strings.CutPrefix(s, `"`)
+	if !ok {
+		return "", s, false
+	}
+	for i, c := range body {
+		if c == '"' {
+			return body[:i], body[i+1:], true
+		}
+	}
+	return "", s, false
 }

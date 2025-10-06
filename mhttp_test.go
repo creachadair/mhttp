@@ -83,18 +83,11 @@ func TestMatch(t *testing.T) {
 		{"*", "", false, false},
 		{"*", "pear", true, true},
 
-		// Without quoting (non-standard, but tolerated).
-		{"plum, cherry", "plum", true, true},
-		{"plum, cherry", "quince", false, false},
-		{"plum, cherry", "", false, false},
-
 		// With quoting.
 		{`"apple", "pear"`, "apple", true, true},
 		{`"apple", "pear"`, `"pear"`, true, true},
 		{`"apple", "pear"`, "plum", false, false},
 		{`"apple", "pear"`, `"plum"`, false, false},
-		{`"apple", pear`, "apple", true, true},
-		{`"apple", pear`, "pear", true, true},
 
 		// With "weak" prefixes.
 		{`W/"apple"`, `"apple"`, false, true},
@@ -104,7 +97,11 @@ func TestMatch(t *testing.T) {
 		{`"apple", W/"pear", "plum"`, `"pear"`, false, true},
 	}
 	for _, tc := range tests {
-		m := mhttp.ParseMatchHeader(tc.header)
+		m, err := mhttp.ParseMatchHeader(tc.header)
+		if err != nil {
+			t.Errorf("ParseMatchHeader(%q) failed: %v", tc.header, err)
+			continue
+		}
 		if got := m.Matches(tc.etag); got != tc.strong {
 			t.Errorf("Strong %#q match %#q: got %v, want %v", tc.header, tc.etag, got, tc.strong)
 		}
@@ -112,4 +109,30 @@ func TestMatch(t *testing.T) {
 			t.Errorf("Weak %#q match %#q: got %v, want %v", tc.header, tc.etag, got, tc.weak)
 		}
 	}
+
+	t.Run("Error", func(t *testing.T) {
+		tests := []struct {
+			header  string
+			wantErr string
+		}{
+			// Without quoting (non-standard, but tolerated).
+			{"plum, cherry", "invalid match term"},
+			{`"plum", cherry`, "invalid match term"},
+			{`W/"plum","cherry", pear`, "invalid match term"},
+			{`"apple", W/"pear" plum`, "extra text after term"},
+			{`"apple",`, "missing term"},
+			{`"pear", `, "missing term"},
+			{` "plum" ,  ,`, "invalid match term"},
+		}
+		for _, tc := range tests {
+			m, err := mhttp.ParseMatchHeader(tc.header)
+			if err == nil {
+				t.Errorf("ParseMatchHeader(%q): got %v, want error", tc.header, m)
+			} else if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("ParseMatchHeader(%q): got error %v, want %q", tc.header, err, tc.wantErr)
+			} else {
+				t.Logf("Parse %q: got expected error: %v", tc.header, err)
+			}
+		}
+	})
 }
