@@ -1,6 +1,6 @@
 github.com/creachadair/mds v0.29.2 h1:1IBhfyolZUCA53twI1hXembOdpIe4bJ4OGJELBbGrN4=
 github.com/creachadair/mds v0.29.2/go.mod h1:dMBTCSy3iS3dwh4Rb1zxeZz2d7K8+N24GCTsayWtQRI=
-github.com/creachadair/tlsutil v0.0.0-20260218173745-49b0059fedaf h1:6ZqacBCoIdOSlwh03zr3TMqA5VyuFpzUS7E2yzfjq7w=
-github.com/creachadair/tlsutil v0.0.0-20260218173745-49b0059fedaf/go.mod h1:YUng4wUBh60nfswe0FwLeBOpoIsrW6ReXt9Zr9k55Sg=
+github.com/creachadair/tlsutil v0.0.0-20260702150345-25a3aef0b79e h1:QAa6B0VYTcJwm9737aE12/y3ChOK07iQqIE3Pjh9SR4=
+github.com/creachadair/tlsutil v0.0.0-20260702150345-25a3aef0b79e/go.mod h1:YUng4wUBh60nfswe0FwLeBOpoIsrW6ReXt9Zr9k55Sg=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
