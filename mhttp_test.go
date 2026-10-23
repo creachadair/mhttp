@@ -21,6 +21,7 @@ func TestParseRangeHeader(t *testing.T) {
 		{"SuffixLength", "bytes=-25", 100, tr(75, 100)},
 		{"Multiple", "bytes=0-9,20-24,-30", 100, tr(0, 10, 20, 25, 70, 100)},
 		{"PinEnd", "bytes=30-90", 50, tr(30, 50)},
+		{"Spaces", "bytes=0-5, 6-9, 11-", 20, tr(0, 6, 6, 10, 11, 20)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
